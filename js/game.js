@@ -440,11 +440,14 @@ function renderTrans(c) {
   const k = tr.t / tr.dur;
   const e = k * k * (3 - 2 * k);
   const [dx, dy] = DIRS[tr.dir];
-  const sw = RW + 2 * WALL, sh = RH + 2 * WALL;
+  const sw = RW + 2 * WALL, sh = RH + 2 * WALL, rx = RX - WALL, ry = RY - WALL;
+  // из снимков берём только комнату со стенами: чёрные поля снимка не должны
+  // закрывать стену соседней комнаты во время сдвига
+  const blit = (cv, ox, oy) => { const ps = cv.width / W; c.drawImage(cv, rx * ps, ry * ps, sw * ps, sh * ps, rx + ox, ry + oy, sw, sh); };
   c.save();
-  c.beginPath(); c.rect(RX - WALL, RY - WALL, sw, sh); c.clip();
-  c.drawImage(tr.A.cv, -dx * e * sw, -dy * e * sh, W, H);
-  c.drawImage(tr.B.cv, dx * (1 - e) * sw, dy * (1 - e) * sh, W, H);
+  c.beginPath(); c.rect(rx, ry, sw, sh); c.clip();
+  blit(tr.A.cv, -dx * e * sw, -dy * e * sh);
+  blit(tr.B.cv, dx * (1 - e) * sw, dy * (1 - e) * sh);
   c.restore();
 }
 
@@ -476,26 +479,71 @@ function renderVS(c) {
   drawHero(c, 230 - slide, H / 2 + 70, { dir: 'down', skin: p.ch.skin, look: p.ch.look, scale: 3.4, wings: p.flight, halo: p.flags.halo, horns: p.flags.brimstone, hat: p.flags.wiz });
   text(c, p.ch.name.toUpperCase(), 230 - slide, H / 2 + 115, 38, '#f2e6cf', 'center', '#000', 5);
   const boss = G.enemies.find(e => e.boss);
+  // портрет босса — по центру красной полосы, масштаб по размеру рисунка
+  const bx = W - 250 + slide, by = H / 2 - 230 * Math.tan(0.12);
+  // мягкий свет за боссом, чтобы тёмные силуэты не терялись
+  if (gfxLevel()) {
+    const gl = c.createRadialGradient(bx, by, 10, bx, by, 105);
+    gl.addColorStop(0, 'rgba(255,220,200,0.2)'); gl.addColorStop(1, 'rgba(255,220,200,0)');
+    circle(c, bx, by, 105, gl);
+  } else circle(c, bx, by, 90, 'rgba(255,220,200,0.1)');
   c.save();
-  c.translate(W - 250 + slide, H / 2 + 20);
   if (boss) {
     if (boss.type === 'mom') {
-      ellipse(c, 0, -10, 90, 50, '#f2eae0', OUT, 4);
-      circle(c, 0, -10, 34, '#6a3a1a'); circle(c, 0, -10, 16, '#111'); circle(c, -10, -20, 6, '#fff');
+      c.translate(bx, by);
+      ellipse(c, 0, 0, 90, 50, '#f2eae0', OUT, 4);
+      circle(c, 0, 0, 34, '#6a3a1a'); circle(c, 0, 0, 16, '#111'); circle(c, -10, -10, 6, '#fff');
     } else {
-      const s = boss.type === 'heart' ? 1.3 : boss.type === 'duke' || boss.type === 'monstro' ? 2 : boss.type === 'blob' ? 1.6 : 2.6;
-      c.scale(s, s);
-      const z = boss.z; boss.z = 0;
-      FLASH = false; TINT = null;
-      boss.d.draw(c, boss, 0, 20);
-      if (boss.type === 'geminiBig' && boss.partner) { c.translate(40, -20); boss.partner.d.draw(c, boss.partner, 0, 0); }
-      boss.z = z;
+      const f = fixBVsFit(boss);
+      c.translate(bx - f.cx * f.s, by - f.cy * f.s); c.scale(f.s, f.s);
+      fixBVsDraw(c, boss);
     }
   }
   c.restore();
   text(c, 'VS', W / 2, H / 2, 64, '#ffd84a', 'center', '#000', 6);
   text(c, (G.bossName || '').toUpperCase(), W - 250 + slide, H / 2 + 115, 38, '#f2e6cf', 'center', '#000', 5);
   c.restore();
+}
+
+// босс для экрана VS в точке (0, 20); у Глиста дорисовываем изогнутое тело
+function fixBVsDraw(c, boss) {
+  const z = boss.z; boss.z = 0;
+  FLASH = false; TINT = null;
+  if (boss.type === 'worm') {
+    const segs = boss.segs, dir = boss.dir;
+    boss.dir = 'down';
+    boss.segs = [];
+    for (let i = 1; i <= 6; i++) boss.segs.push({ x: i * 17, y: 20 - i * 9 + Math.sin(i * 1.2) * 7 });
+    boss.d.draw(c, boss, 0, 20);
+    boss.segs = segs; boss.dir = dir;
+  } else {
+    boss.d.draw(c, boss, 0, 20);
+    if (boss.type === 'geminiBig' && boss.partner) { c.save(); c.translate(40, -20); boss.partner.d.draw(c, boss.partner, 0, 0); c.restore(); }
+  }
+  boss.z = z;
+}
+// размеры рисунка босса измеряются один раз за показ экрана VS
+let fixBVsCache = null;
+function fixBVsFit(boss) {
+  if (fixBVsCache && fixBVsCache.boss === boss) return fixBVsCache;
+  const S = 480, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  g.translate(S / 2, S / 2);
+  fixBVsDraw(g, boss);
+  const d = g.getImageData(0, 0, S, S).data;
+  let x0 = S, y0 = S, x1 = -1, y1 = -1;
+  for (let y = 0; y < S; y += 2) {
+    for (let x = 0; x < S; x += 2) {
+      if (d[(y * S + x) * 4 + 3] < 60) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) { x0 = S / 2 - 30; x1 = S / 2 + 30; y0 = S / 2 - 40; y1 = S / 2 + 20; }
+  const bw = x1 - x0 + 2, bh = y1 - y0 + 2;
+  const s = clamp(Math.min(210 / bw, 150 / bh), 1, 2.8);
+  fixBVsCache = { boss, s, cx: (x0 + x1) / 2 - S / 2, cy: (y0 + y1) / 2 - S / 2 };
+  return fixBVsCache;
 }
 
 function renderPause(c) {
@@ -507,14 +555,18 @@ function renderPause(c) {
   // предметы
   const items = p.items.slice();
   if (p.active) items.unshift(p.active.id);
-  const cols = 12, sz = 40;
-  const x0 = W / 2 - Math.min(items.length, cols) * sz / 2 + sz / 2;
-  items.forEach((id, i) => {
-    const x = x0 + (i % cols) * sz, y = 150 + Math.floor(i / cols) * sz;
-    drawItemIcon(c, id, x, y, 0.95);
-  });
-  if (!items.length) text(c, 'Предметов пока нет', W / 2, 150, 18, '#8a7a60', 'center', null);
-  const y0 = 150 + Math.ceil(Math.max(1, items.length) / cols) * sz + 10;
+  // много предметов — значки мельче; что не поместилось, показываем числом «+N»,
+  // чтобы кнопки всегда оставались внутри панели
+  const n = items.length, many = n > 36;
+  const cols = many ? 16 : 12, sz = many ? 30 : 40;
+  const rows = Math.min(many ? 4 : 3, Math.ceil(Math.max(1, n) / cols));
+  const shown = n > rows * cols ? rows * cols - 1 : n;
+  const x0 = W / 2 - Math.min(n, cols) * sz / 2 + sz / 2;
+  const slot = i => [x0 + (i % cols) * sz, 130 + sz / 2 + Math.floor(i / cols) * sz];
+  items.slice(0, shown).forEach((id, i) => { const [x, y] = slot(i); drawItemIcon(c, id, x, y, many ? 0.7 : 0.95); });
+  if (shown < n) { const [x, y] = slot(shown); text(c, '+' + (n - shown), x, y + 1, 18, '#5a4030', 'center', null); }
+  if (!n) text(c, 'Предметов пока нет', W / 2, 150, 18, '#8a7a60', 'center', null);
+  const y0 = Math.min(130 + rows * sz + 30, 266);
   const s = G.stats;
   text(c, 'Убито: ' + s.kills + '   Время: ' + fmtTime(s.time) + '   Сид: ' + seedStr(), W / 2, y0, 17, '#5a4030', 'center', null);
   PAUSE_OPTS.forEach(([label, cb], i) => {
@@ -579,20 +631,32 @@ function charStats(i) {
   return G.charStats[i];
 }
 
+// фон меню (тёмный подвал) рисуется один раз в холст и дальше только копируется
+let fixBMenuBg = null;
+function fixBMenuBackground(c) {
+  if (!fixBMenuBg || fixBMenuBg.ps !== PIXEL_SCALE) {
+    const m = makeCanvas(W, H), g0 = m.ctx;
+    const g = g0.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, W * 0.7);
+    g.addColorStop(0, '#3a2a20'); g.addColorStop(1, '#0a0605');
+    g0.fillStyle = g; g0.fillRect(0, 0, W, H);
+    for (let i = 0; i < 40; i++) {
+      const x = hrand(i, 1) * W, y = hrand(i, 2) * H;
+      circle(g0, x, y, 20 + hrand(i, 3) * 60, 'rgba(0,0,0,0.12)');
+    }
+    fixBMenuBg = { cv: m.cv, ps: PIXEL_SCALE };
+  }
+  c.drawImage(fixBMenuBg.cv, 0, 0, W, H);
+}
+
 function renderMenu(c, bgOnly) {
   // фон — тёмный подвал
-  const g = c.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, W * 0.7);
-  g.addColorStop(0, '#3a2a20'); g.addColorStop(1, '#0a0605');
-  c.fillStyle = g; c.fillRect(0, 0, W, H);
-  for (let i = 0; i < 40; i++) {
-    const x = hrand(i, 1) * W, y = hrand(i, 2) * H;
-    circle(c, x, y, 20 + hrand(i, 3) * 60, 'rgba(0,0,0,0.12)');
-  }
+  fixBMenuBackground(c);
+  // под настройками заголовок не нужен — он выглядывал бы из-за панели
+  if (bgOnly) return;
   // заголовок
   const bob = Math.sin(G.t * 0.03) * 3;
   text(c, 'СЛЁЗЫ ПОДВАЛА', W / 2, 58 + bob, 62, '#e8dcc0', 'center', '#000', 7);
   text(c, '~ покаяние ~', W / 2, 102 + bob, 25, '#c44040', 'center', '#000', 4);
-  if (bgOnly) return;
 
   // карусель персонажей: выбранный в центре, по два соседа с каждой стороны
   const n = CHARACTERS.length;
@@ -605,11 +669,11 @@ function renderMenu(c, bgOnly) {
     const x = W / 2 + k * 128;
     const big = k === 0;
     const sc = big ? 2.7 : Math.abs(k) === 1 ? 1.55 : 1.15;
-    if (big) {
+    if (big && gfxLevel()) {
       const gl = c.createRadialGradient(x, y - 45, 10, x, y - 45, 110);
       gl.addColorStop(0, 'rgba(255,230,180,0.25)'); gl.addColorStop(1, 'rgba(255,230,180,0)');
       c.fillStyle = gl; c.fillRect(x - 110, y - 160, 220, 220);
-    }
+    } else if (big) circle(c, x, y - 45, 80, 'rgba(255,230,180,0.07)');
     shadow(c, x, y + 2, 12 * sc, 3.6 * sc, 0.5);
     drawHero(c, x, y, {
       dir: 'down', skin: ch.skin, look: ch.look, scale: sc, alpha: big ? (ch.lost ? 0.85 : 1) : Math.abs(k) === 1 ? 0.5 : 0.25,
@@ -624,10 +688,12 @@ function renderMenu(c, bgOnly) {
   const hearts = [];
   for (let i = 0; i < ch.hearts; i++) hearts.push('red');
   for (let i = 0; i < (ch.soul || 0); i++) hearts.push('soul');
-  const rowW = hearts.length * 20 + (ch.active ? 44 : 0) + (ch.extraLives ? 40 : 0) + (ch.lost ? 120 : 0);
+  c.font = font(16);
+  const lostW = ch.lost ? Math.ceil(c.measureText('нет сердец').width) + 10 : 0;
+  const rowW = hearts.length * 20 + (ch.active ? 44 : 0) + (ch.extraLives ? 40 : 0) + lostW;
   let hx = W / 2 - rowW / 2 + 10;
   for (const k of hearts) { drawHeart(c, hx, 364, 18, k); hx += 20; }
-  if (ch.lost) { text(c, 'нет сердец', hx + 50, 364, 16, '#c8b89a', 'center'); hx += 120; }
+  if (ch.lost) { text(c, 'нет сердец', hx - 10 + lostW / 2, 364, 16, '#c8b89a', 'center'); hx += lostW; }
   if (ch.extraLives) { text(c, '+1 жизнь', hx + 16, 364, 14, '#ffd84a', 'center'); hx += 40; }
   if (ch.active) drawItemIcon(c, ch.active, hx + 18, 362, 0.8);
   const st = charStats(sel);
@@ -673,9 +739,13 @@ function renderSettings(c) {
     G.ui.push({ x: bl.x, y: bl.y, w: bl.w, h: bl.h, cb: () => { G.setSel = i; Settings.cycle(d.key, -1); } });
     G.ui.push({ x: br.x, y: br.y, w: br.w, h: br.h, cb: () => { G.setSel = i; Settings.cycle(d.key, 1); } });
     G.ui.push({ x: px + 16, y, w: bl.x - px - 20, h: rowH - 5, cb: () => { G.setSel = i; Settings.cycle(d.key, 1); } });
-    text(c, Settings.label(d.key), vx - 15, y + rowH / 2 - 2, 20, '#5a1e10', 'center', null);
-    // образец снаряда рядом с настройками заметности
-    if (d.key === 'projVis' || d.key === 'shotColor') drawShotSample(c, vx + 54, y + rowH / 2 - 2);
+    // значение — по центру между стрелками, длинное слово чуть уменьшается
+    const val = Settings.label(d.key);
+    c.font = font(20);
+    const fs = Math.min(20, Math.floor(20 * 150 / Math.max(1, c.measureText(val).width)));
+    text(c, val, vx, y + rowH / 2 - 2, fs, '#5a1e10', 'center', null);
+    // образец снаряда рядом с настройками заметности — справа от стрелок, чтобы не налезал на текст
+    if (d.key === 'projVis' || d.key === 'shotColor') drawShotSample(c, br.x + br.w + 20, y + rowH / 2 - 2);
   });
   const by = y0 + SETTINGS_DEF.length * rowH + 4;
   uiButton(c, W / 2 - 110, by, 220, 40, 'Назад', () => closeSettings(), { selected: G.setSel === SETTINGS_DEF.length });
@@ -711,6 +781,7 @@ function resize() {
   PIXEL_SCALE = canvas.width / W;
   G.bgCache = null;
   G.snaps = [];
+  fixBMenuBg = null;
   buildVignette();
 }
 

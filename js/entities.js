@@ -28,6 +28,23 @@ function bloodBurst(x, y, n = 10, color = '#9a1010') {
     addParticle(x, y, Math.cos(a) * s, Math.sin(a) * s, color, rand(2, 4.5), randi(20, 40), true, rand(4, 14));
   }
   addDecal({ type: 'blood', x, y, r: rand(10, 18), color });
+  // короткий «шлепок» брызг (только визуально)
+  if (gfxLevel()) {
+    const seed = rand(0, 6), R = 5 + Math.min(n, 30) * 0.45;
+    addEffect({
+      x, y, life: 12,
+      draw(c, e) {
+        const k = e.t / e.life;
+        c.globalAlpha = (1 - k) * 0.85;
+        for (let i = 0; i < 5; i++) {
+          const a = seed + i * 1.257, d = R * (0.3 + k * 0.9);
+          circle(c, x + Math.cos(a) * d, y + Math.sin(a) * d * 0.7, R * 0.34 * (1 - k * 0.5), color);
+        }
+        circle(c, x, y, R * 0.5 * (1 - k), color);
+        c.globalAlpha = 1;
+      },
+    });
+  }
 }
 function addDecal(d) {
   const room = G.room;
@@ -40,28 +57,38 @@ function addDecal(d) {
 function addEffect(fx) { fx.t = 0; G.effects.push(fx); return fx; }
 
 function poof(x, y, r = 14, color = 'rgba(230,230,230,') {
+  const L = gfxLevel(), n = [3, 5, 7][L];
   addEffect({
     x, y, life: 18,
     draw(c, e) {
-      const k = e.t / e.life;
-      for (let i = 0; i < 5; i++) {
-        const a = i * 1.26 + x;
-        circle(c, x + Math.cos(a) * r * k, y + Math.sin(a) * r * k * 0.7, r * 0.5 * (1 - k * 0.6), color + (0.6 * (1 - k)) + ')');
+      const k = e.t / e.life, a = (0.6 * (1 - k)).toFixed(3);
+      for (let i = 0; i < n; i++) {
+        const an = i * 6.283 / n + x, h = L ? 0.8 + 0.4 * artHash(x, i) : 1;
+        const px = x + Math.cos(an) * r * k, py = y + Math.sin(an) * r * k * 0.7 - k * r * 0.3, pr = r * 0.5 * (1 - k * 0.6) * h;
+        circle(c, px, py, pr, color + a + ')');
+        if (L === 2) circle(c, px - pr * 0.25, py - pr * 0.3, pr * 0.55, 'rgba(255,255,255,' + (0.25 * (1 - k)).toFixed(3) + ')');
       }
     },
   });
 }
 function splashFx(x, y, color, size = 6) {
+  if (color === '#c43030') color = shotColor().fill; // брызги вражеских снарядов — в цвет из настроек
+  const L = gfxLevel(), n = [4, 6, 8][L], seed = rand(0, 6);
   addEffect({
-    x, y, life: 14,
+    x, y, life: 16,
     draw(c, e) {
       const k = e.t / e.life;
       c.globalAlpha = 1 - k;
-      for (let i = 0; i < 6; i++) {
-        const a = i * 1.047;
-        circle(c, x + Math.cos(a) * size * 1.6 * k, y + Math.sin(a) * size * k, size * 0.45 * (1 - k), color);
+      // кольцо-всплеск
+      ellipse(c, x, y + size * 0.2, size * (0.5 + k * 1.1), size * 0.5 * (0.5 + k * 1.1), null, color, 1.6 * (1 - k) + 0.4);
+      // капли разлетаются по дуге
+      for (let i = 0; i < n; i++) {
+        const a = seed + i * 6.283 / n, sp = 0.8 + artHash(seed, i) * 0.6;
+        const dx = Math.cos(a) * size * 1.9 * k * sp, dy = Math.sin(a) * size * 1.15 * k * sp - Math.sin(k * Math.PI) * size * 0.9 * sp;
+        circle(c, x + dx, y + dy, size * 0.3 * (1 - k * 0.6), color);
       }
-      ellipse(c, x, y, size * (0.6 + k), size * 0.6 * (0.6 + k), null, color, 1.5);
+      if (k < 0.35) circle(c, x, y, size * 0.85 * (1 - k / 0.35), color);
+      if (L === 2 && k < 0.5) circle(c, x - size * 0.2, y - size * 0.25, size * 0.25 * (1 - k * 2), '#fff');
       c.globalAlpha = 1;
     },
   });
@@ -70,21 +97,15 @@ function splashFx(x, y, color, size = 6) {
 // ---------- взрыв ----------
 function explode(x, y, o = {}) {
   const R = o.r || 72, dmg = o.dmg != null ? o.dmg : 60;
+  // огненный шар, ударная волна и дым (life 26 — по нему освещение узнаёт взрыв)
+  const seed = rand(0, 6), small = !!o.small;
   addEffect({
     x, y, life: 26,
-    draw(c, e) {
-      const k = e.t / e.life;
-      const rr = R * (0.4 + k * 0.7);
-      c.globalAlpha = 1 - k;
-      circle(c, x, y, rr, 'rgba(255,170,40,0.55)');
-      circle(c, x, y, rr * 0.7, 'rgba(255,230,120,0.7)');
-      circle(c, x, y, rr * 0.35 * (1 - k), '#fff');
-      c.globalAlpha = 1;
-    },
+    draw(c, e) { artExplosion(c, x, y, R, e.t / e.life, seed, small); },
   });
   for (let i = 0; i < (o.small ? 8 : 22); i++) {
     const a = rand(0, Math.PI * 2), s = rand(1, 5);
-    addParticle(x, y, Math.cos(a) * s, Math.sin(a) * s, pick(['#555', '#777', '#ff9a30', '#ffd060']), rand(3, 7), randi(20, 45));
+    addParticle(x, y, Math.cos(a) * s, Math.sin(a) * s, pick(['#4e4844', '#6e6862', '#ff9a30', '#ffd060', '#ff7a24']), rand(3, 7), randi(20, 45));
   }
   Sound.play(o.small ? 'hit' : 'explode');
   G.shake = Math.max(G.shake, o.small ? 4 : 11);
@@ -267,6 +288,8 @@ class Player {
     }
   }
   addFamiliar(kind) {
+    // примерка предмета (описание в подсказке) не должна трогать настоящих спутников
+    if (this.sandbox) return;
     const f = new Familiar(kind, this.familiars.filter(x => x.kind !== 'orbital').length);
     f.x = this.x; f.y = this.y;
     this.familiars.push(f);
@@ -470,15 +493,18 @@ class Player {
   }
 
   draw(c) {
+    // луч серы вверх уходит за голову
+    for (const b of G.beams) if (b.follow === this) b.draw(c, true);
     if (this.dead) return;
     const blink = this.invuln > 0 && Math.floor(this.invuln / 4) % 2 === 0;
-    shadow(c, this.x, this.y + 1, 12 * this.size, 4.5 * this.size, 0.4);
-    if (this.charge > 0 && this.flags.brimstone) {
-      const k = this.charge / this.chargeMax;
-      circle(c, this.x, this.y - 25 * this.size, 16 + k * 6, 'rgba(200,20,20,' + (0.15 + k * 0.35) + ')');
+    const L = gfxLevel();
+    shadow(c, this.x, this.y + 1, 12 * this.size * (this.flight ? 0.85 : 1), 4.5 * this.size, this.flight ? 0.3 : 0.4);
+    if (this.charge > 0 && this.flags.brimstone) artChargeGlow(c, this.x, this.y - 25 * this.size, this.charge / this.chargeMax, G.t);
+    if (this.shieldT > 0) artShield(c, this.x, this.y - 18, G.t, this.shieldT);
+    else if (this.mantle) {
+      circle(c, this.x, this.y - 18, 23, null, 'rgba(255,255,255,0.35)', 1.5);
+      if (L === 2) artSparkles(c, this.x, this.y - 18, G.t, 2, 22, 'rgba(255,255,255,0.8)');
     }
-    if (this.shieldT > 0) circle(c, this.x, this.y - 18, 24, 'rgba(255,250,200,0.25)', 'rgba(255,240,160,0.8)', 2);
-    else if (this.mantle) circle(c, this.x, this.y - 18, 23, null, 'rgba(255,255,255,0.35)', 1.5);
     drawHero(c, this.x, this.y - (this.flight ? 6 + Math.sin(G.t * 0.1) * 2 : 0), {
       dir: this.holding > 0 ? 'down' : this.headDir, skin: this.ch.skin, look: this.ch.look,
       moving: this.moving, walk: this.walk, shoot: this.shootT || (this.charge > 0 ? 1 : 0), scale: this.size,
@@ -486,7 +512,10 @@ class Player {
       wings: this.flight, halo: this.flags.halo, horns: this.flags.brimstone || this.items.includes('pentagram') && this.items.includes('goat'),
       hat: this.flags.wiz,
     });
-    if (this.holding > 0 && this.holdItem) drawItemIcon(c, this.holdItem, this.x, this.y - 64 * this.size, 1);
+    if (this.holding > 0 && this.holdItem) {
+      if (L) artHoldRays(c, this.x, this.y - 64 * this.size, G.t);
+      drawItemIcon(c, this.holdItem, this.x, this.y - 64 * this.size, 1);
+    }
   }
 }
 
@@ -604,18 +633,11 @@ class Tear {
 
   draw(c) {
     const y = this.y - this.z;
-    shadow(c, this.x, this.y + 2, this.r * 0.8, this.r * 0.32, 0.3);
-    if (this.enemy) {
-      circle(c, this.x, y, this.r, '#c42828', '#3a0808', 1.5);
-      circle(c, this.x - this.r * 0.3, y - this.r * 0.3, this.r * 0.32, '#ff9a9a');
-    } else {
-      const g = c.createRadialGradient(this.x - this.r * 0.3, y - this.r * 0.35, this.r * 0.1, this.x, y, this.r);
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.35, this.color);
-      g.addColorStop(1, mixColor(this.color, '#203050', 0.45));
-      circle(c, this.x, y, this.r, g, 'rgba(10,20,40,0.6)', 1.2);
-      if (this.flags.spectral) circle(c, this.x, y, this.r + 2, null, 'rgba(255,255,255,0.35)', 1);
-    }
+    // тень тем меньше и бледнее, чем выше слеза
+    const zk = Math.max(0.55, 1 - this.z * 0.012);
+    shadow(c, this.x, this.y + 2, this.r * 0.8 * zk, this.r * 0.32 * zk, 0.3 * zk);
+    if (this.enemy) drawEnemyShot(c, this.x, y, this.r, G.t);
+    else artTear(c, this.x, y, this.r, this.color, this.vx, this.vy, this.flags.spectral);
   }
 }
 
@@ -677,24 +699,18 @@ class Beam {
     }
     if (--this.life <= 0) this.dead = true;
   }
-  draw(c) {
+  // луч героя, бьющий вверх, рисуется вместе с героем — позади головы
+  behindHero() { return this.follow === G.player && Math.sin(this.angle) < -0.3; }
+  draw(c, under) {
+    if (!!under !== this.behindHero()) return;
     const k = this.life / this.max;
     const w = this.width * (this.kind === 'brim' ? (0.6 + 0.4 * Math.min(1, k * 3)) : k);
-    c.save();
-    c.lineCap = 'round';
-    const wob = this.kind === 'brim' ? Math.sin(G.t * 0.9) * 2 : 0;
-    const y0 = this.y - 10, y1 = this.ey - 10;
-    if (this.kind === 'brim') {
-      line(c, this.x, y0, this.ex, y1, 'rgba(120,0,0,0.55)', w + 10 + wob);
-      line(c, this.x, y0, this.ex, y1, '#d01818', w + wob);
-      line(c, this.x, y0, this.ex, y1, '#ff8a6a', w * 0.4);
-      circle(c, this.ex, y1, w * 0.8, 'rgba(220,30,30,0.7)');
-    } else {
-      line(c, this.x, y0, this.ex, y1, 'rgba(255,40,40,0.45)', w + 6);
-      line(c, this.x, y0, this.ex, y1, '#ff4040', w);
-      line(c, this.x, y0, this.ex, y1, '#fff', Math.max(1, w * 0.35));
-    }
-    c.restore();
+    // рисунок начинается чуть впереди лица, чтобы не закрывать героя (попадания считаются как раньше)
+    const len = Math.hypot(this.ex - this.x, this.ey - this.y);
+    const off = this.follow ? Math.min(14 * (this.follow.size || 1), Math.max(0, len - 4)) : 0;
+    const ox = Math.cos(this.angle) * off, oy = Math.sin(this.angle) * off;
+    // ядро, свечение, рваные края и вспышка в точке удара (gfx.js)
+    artBeam(c, this.x + ox, this.y - 10 + oy, this.ex, this.ey - 10, w, this.kind, G.t);
   }
 }
 
@@ -721,10 +737,13 @@ class Bomb {
     }
   }
   draw(c) {
-    const s = this.big ? 1.35 : 1;
-    const pulse = 1 + (this.fuse < 30 ? Math.sin(this.t * 0.9) * 0.08 : 0);
+    const s = this.big ? 1.35 : 1, warn = this.fuse < 30;
+    const pulse = 1 + (warn ? Math.sin(this.t * 0.9) * 0.08 : 0);
+    const flash = warn && Math.floor(this.t / 3) % 2 === 0;
     shadow(c, this.x, this.y + 6, 11 * s, 4 * s, 0.4);
-    drawBomb(c, this.x, this.y - 6, 9.5 * s * pulse, this.t, this.fuse < 30 && Math.floor(this.t / 3) % 2 === 0);
+    // красное зарево перед взрывом
+    if (warn && gfxLevel()) circle(c, this.x, this.y - 6, 9.5 * s * (1.5 + (30 - this.fuse) / 30 * 0.6), 'rgba(255,40,30,' + (flash ? 0.3 : 0.14) + ')');
+    drawBomb(c, this.x, this.y - 6, 9.5 * s * pulse, this.t, flash);
   }
 }
 
@@ -821,15 +840,26 @@ class Pickup {
   draw(c) {
     const y = this.y - this.z;
     const bob = this.shop ? Math.sin(this.t * 0.06) * 1.5 : 0;
-    if (this.kind !== 'chest' && this.kind !== 'goldchest') shadow(c, this.x, this.y + 5, 8, 3, 0.35);
+    const L = gfxLevel();
+    if (this.kind !== 'chest' && this.kind !== 'goldchest') {
+      const zk = Math.max(0.5, 1 - this.z * 0.04);
+      shadow(c, this.x, this.y + 5, 8 * zk, 3 * zk, 0.35 * zk);
+    }
+    // сердечки «бьются», монеты поблёскивают
+    const beat = L ? 1 + Math.pow(Math.max(0, Math.sin(this.t * 0.1 + this.x)), 8) * 0.12 : 1;
     switch (this.kind) {
       case 'coin': {
         const sx = this.shop ? 1 : Math.abs(Math.cos(this.t * 0.05)) * 0.6 + 0.4;
-        c.save(); c.translate(this.x, y - 3 + bob); c.scale(sx, 1); drawCoin(c, 0, 0, 7, this.value); c.restore();
+        const sh = ((this.t + this.x * 7) % 140) / 26;
+        c.save(); c.translate(this.x, y - 3 + bob); c.scale(sx, 1); drawCoin(c, 0, 0, 7, this.value, sh); c.restore();
+        if (L === 2 && sh > 0.3 && sh < 0.9) artStar4(c, this.x + 4, y - 8 + bob, 2.2 * Math.sin((sh - 0.3) / 0.6 * Math.PI), '#fffbe0');
         break;
       }
-      case 'heart': drawHeart(c, this.x, y - 4 + bob, 18, this.value === 1 ? 'half' : 'red'); break;
-      case 'soulheart': drawHeart(c, this.x, y - 4 + bob, 18, 'soul'); break;
+      case 'heart': drawHeart(c, this.x, y - 4 + bob, 18 * beat, this.value === 1 ? 'half' : 'red'); break;
+      case 'soulheart':
+        if (L === 2) circle(c, this.x, y - 4 + bob, 11, 'rgba(150,190,255,0.18)');
+        drawHeart(c, this.x, y - 4 + bob, 18 * beat, 'soul');
+        break;
       case 'bomb': drawBomb(c, this.x - (this.value > 1 ? 4 : 0), y - 2 + bob, 7, -1); if (this.value > 1) drawBomb(c, this.x + 5, y + bob, 7, -1); break;
       case 'key': drawKey(c, this.x, y - 3 + bob, 16); break;
       case 'pill': drawPill(c, this.x, y - 3 + bob, 15, G.pillColors[this.pill]); break;
@@ -911,17 +941,18 @@ class Pedestal {
     }
   }
   draw(c) {
-    shadow(c, this.x, this.y + 8, 17, 5, 0.4);
-    // каменная подставка
-    rrect(c, this.x - 15, this.y - 8, 30, 16, 3, '#8b8578', OUT, 2);
-    c.fillStyle = '#a8a294'; c.fillRect(this.x - 13, this.y - 7, 26, 4);
-    rrect(c, this.x - 18, this.y - 12, 36, 6, 2, '#9c968a', OUT, 2);
+    const L = gfxLevel();
+    shadow(c, this.x, this.y + 8, 18, 5, 0.4);
+    // каменный алтарь с резьбой (спрайт из gfx.js)
+    artAltar(c, this.x, this.y, G.room && G.room.type);
     if (this.item) {
-      const by = this.y - 34 + Math.sin(this.t * 0.06) * 3;
-      const g = c.createRadialGradient(this.x, by, 2, this.x, by, 26);
-      g.addColorStop(0, 'rgba(255,255,220,0.35)'); g.addColorStop(1, 'rgba(255,255,220,0)');
-      circle(c, this.x, by, 26, g);
+      const lift = Math.sin(this.t * 0.06) * 3, by = this.y - 34 + lift;
+      if (L) {
+        artItemLight(c, this.x, this.y, this.t, L);
+        ellipse(c, this.x, this.y - 11, 8 - lift * 0.5, 2.2, 'rgba(0,0,0,0.22)');
+      }
       drawItemIcon(c, this.item, this.x, by, 1);
+      if (L === 2) artSparkles(c, this.x, by, this.t);
       if (this.price) text(c, this.price + '¢', this.x, this.y + 22, 16, '#fff', 'center');
       if (this.devil) {
         const p = G.player;
@@ -950,13 +981,8 @@ class Trapdoor {
     if (d < 18 && !p.dead) nextFloor();
   }
   draw(c) {
-    const k = Math.min(1, this.t / 20);
-    ellipse(c, this.x, this.y, 30 * k, 22 * k, '#3a2414', OUT, 3);
-    ellipse(c, this.x, this.y + 1, 24 * k, 17 * k, '#000');
-    for (let i = 0; i < 4; i++) {
-      const a = i * Math.PI / 2 + 0.6;
-      circle(c, this.x + Math.cos(a) * 28 * k, this.y + Math.sin(a) * 20 * k, 2.5, '#8a8a8a', OUT, 1);
-    }
+    // деревянный люк: рама из досок, колодец с лестницей в темноту (gfx.js)
+    artTrapdoor(c, this.x, this.y, Math.min(1, this.t / 20));
   }
 }
 
@@ -1008,13 +1034,17 @@ class Familiar {
   draw(c) {
     if (this.kind === 'orbital') {
       shadow(c, this.x, this.y + 14, 6, 2.5, 0.25);
-      c.save(); c.translate(this.x, this.y); c.scale(0.7, 0.7); ICONS.orbital(c); c.restore();
+      artOrbital(c, this.x, this.y, this.t);
       return;
     }
     shadow(c, this.x, this.y + 2, 8, 3, 0.3);
-    const skin = this.kind === 'demon' ? '#4a4048' : '#f3d9c9';
-    drawHero(c, this.x, this.y, { dir: this.dir, skin, look: 'kai', scale: 0.55, moving: false, horns: this.kind === 'demon' });
-    if (this.kind === 'sis') { poly(c, [this.x, this.y - 21, this.x - 6, this.y - 25, this.x - 6, this.y - 18], '#f07aa0', OUT, 1); poly(c, [this.x, this.y - 21, this.x + 6, this.y - 25, this.x + 6, this.y - 18], '#f07aa0', OUT, 1); }
+    const demon = this.kind === 'demon', sis = this.kind === 'sis';
+    // плачет сразу после выстрела
+    const cry = this.cd > (sis ? 8 : demon ? 14 : 20) ? 4 : 0;
+    drawHero(c, this.x, this.y, {
+      dir: this.dir, skin: demon ? '#4a4048' : '#f3d9c9', look: demon ? 'horned' : 'kai', scale: 0.55,
+      moving: false, t: this.t + this.index * 37, shoot: cry, bow: sis,
+    });
   }
 }
 
