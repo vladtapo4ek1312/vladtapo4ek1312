@@ -512,8 +512,25 @@ function drawHero(c, x, y, o) {
   if (o.alpha != null) c.globalAlpha *= o.alpha;
   const sw = o.moving ? Math.sin(o.walk || 0) * 3 : 0;
   const side = dir === 'left' || dir === 'right';
+  // ярость Буяна
+  if (o.rage) {
+    const g = c.createRadialGradient(0, -22, 4, 0, -22, 34);
+    g.addColorStop(0, 'rgba(255,40,20,0.35)'); g.addColorStop(1, 'rgba(255,40,20,0)');
+    c.fillStyle = g; c.fillRect(-36, -58, 72, 72);
+  }
   // крылья
-  if (o.wings) {
+  if (o.wings && look === 'horned') {
+    // перепончатые крылья
+    const fl = Math.sin((o.t || 0) * 0.35) * 0.3;
+    for (const k of [-1, 1]) {
+      c.save(); c.translate(k * 5, -14); c.rotate(k * (0.25 + fl)); c.scale(k, 1);
+      c.beginPath(); c.moveTo(0, 0); c.lineTo(10, -16); c.lineTo(24, -14);
+      c.quadraticCurveTo(20, -9, 22, -4); c.quadraticCurveTo(16, -5, 15, 0); c.quadraticCurveTo(9, -2, 0, 4); c.closePath();
+      c.fillStyle = '#2a1c24'; c.fill(); c.strokeStyle = OUT; c.lineWidth = 1.5; c.stroke();
+      line(c, 10, -16, 15, 0, '#140c12', 1);
+      c.restore();
+    }
+  } else if (o.wings) {
     const fl = Math.sin((o.t || 0) * 0.3) * 0.25;
     for (const k of [-1, 1]) {
       c.save(); c.translate(k * 5, -14); c.rotate(k * (0.3 + fl)); c.scale(k, 1);
@@ -528,6 +545,7 @@ function drawHero(c, x, y, o) {
   ellipse(c, 4 - lx, -2 - ly, 3.3, 3, skin, OUT, 1.5);
   // тело
   ellipse(c, 0, -9, 7.5, 7, skin, OUT, 1.6);
+  if (look === 'phoenix') { c.save(); c.beginPath(); c.ellipse(0, -9, 7.5, 7, 0, 0, Math.PI * 2); c.clip(); c.fillStyle = '#b8481c'; c.fillRect(-8, -9, 16, 9); c.restore(); ellipse(c, 0, -9, 7.5, 7, null, OUT, 1.6); }
   if (look === 'outcast') { c.save(); c.beginPath(); c.ellipse(0, -9, 7.5, 7, 0, 0, Math.PI * 2); c.clip(); c.fillStyle = '#6a1e1e'; c.fillRect(-8, -12, 16, 12); c.restore(); ellipse(c, 0, -9, 7.5, 7, null, OUT, 1.6); }
   // руки
   if (o.holding) {
@@ -552,11 +570,31 @@ function drawHero(c, x, y, o) {
     poly(c, [-9, hy - 10, 9, hy - 10, 7, hy - 22, -7, hy - 22], '#8a1e22', OUT, 1.6);
     line(c, 3, hy - 22, 9, hy - 16, '#e6c264', 1.5);
   }
+  if (look === 'brute') {
+    // торчащие волосы и красная повязка
+    poly(c, [-13, hy - 5, -12, hy - 16, -7, hy - 12, -5, hy - 20, 0, hy - 14, 4, hy - 21, 6, hy - 13, 12, hy - 17, 13, hy - 5, 0, hy - 9], '#3a2216', OUT, 1.4);
+    c.beginPath(); c.arc(0, hy + 1, hr - 0.5, Math.PI * 1.08, Math.PI * 1.92); c.strokeStyle = '#c42424'; c.lineWidth = 3.5; c.stroke();
+    if (dir !== 'up') { line(c, -9, hy - 3, -3, hy - 1, OUT, 1.8); line(c, 9, hy - 3, 3, hy - 1, OUT, 1.8); }
+    else { line(c, -2, hy - 10, -6, hy - 2, '#c42424', 2.5); line(c, 2, hy - 10, 5, hy - 1, '#c42424', 2.5); }
+  }
+  if (look === 'phoenix') {
+    // огненный хохолок
+    const f = Math.sin((o.t || 0) * 0.25) * 1.5;
+    for (const [dx, h, col] of [[-6, 10, '#ff8a24'], [6, 10, '#ff8a24'], [0, 15, '#ff5a1a']]) {
+      c.beginPath(); c.moveTo(dx - 4, hy - 11); c.quadraticCurveTo(dx - 3 + f, hy - 11 - h, dx + f * 0.5, hy - 13 - h); c.quadraticCurveTo(dx + 4, hy - 11 - h * 0.5, dx + 4, hy - 11); c.closePath();
+      c.fillStyle = col; c.fill(); c.strokeStyle = OUT; c.lineWidth = 1.3; c.stroke();
+    }
+    circle(c, 0, hy - 14, 3, '#ffd84a');
+  }
+  if (look === 'horned') {
+    poly(c, [-8, hy - 10, -15, hy - 24, -13, hy - 13, -3, hy - 13], '#1a1216', OUT, 1.4);
+    poly(c, [8, hy - 10, 15, hy - 24, 13, hy - 13, 3, hy - 13], '#1a1216', OUT, 1.4);
+  }
   // лицо
   const tearing = o.shoot > 0;
   const eye = (ex, ey, sc = 1) => {
-    ellipse(c, ex, ey, 3.3 * sc, 4.3, '#141010');
-    circle(c, ex - 1.1 * sc, ey - 1.6, 1.2, '#fff');
+    ellipse(c, ex, ey, 3.3 * sc, 4.3, look === 'horned' ? '#c41818' : '#141010');
+    circle(c, ex - 1.1 * sc, ey - 1.6, 1.2, look === 'horned' ? '#ffb0a0' : '#fff');
     if (tearing) ellipse(c, ex, ey + 6, 1.6, 2.4, '#8cc8ff');
   };
   if (dir === 'down') {

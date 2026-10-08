@@ -11,7 +11,7 @@ const G = {
   bgCache: null, snaps: [], ui: [], trans: null,
   seenItems: new Set(), bossesSeen: new Set(), pillKnown: new Set(), pillPool: [], pillColors: {},
   stats: { kills: 0, time: 0, items: 0 },
-  charIdx: 0, menuSel: 0, pauseSel: 0, restartHold: 0, flowTimer: 0, flowTile: -1,
+  charIdx: 0, menuSel: 0, menuFocus: 0, menuBtn: 0, pauseSel: 0, setSel: 0, settingsFrom: 'menu', restartHold: 0, flowTimer: 0, flowTile: -1,
   bossMax: 0, bossName: '', pendingVS: false, vsT: 0, introT: 0, fadeT: 0, deathT: 0, winT: 0,
   diarrhea: 0, diarrheaT: 0, devilTaken: false, damagedFloor: false, damagedBoss: false, deathCause: '',
 };
@@ -218,6 +218,7 @@ function update() {
       if (G.vsT > 150 || (G.vsT > 25 && (Input.pressed('confirm') || Input.clicks.length))) { G.state = 'play'; G.pendingVS = false; }
       break;
     case 'pause': updatePause(); break;
+    case 'settings': updateSettings(); break;
     case 'floorOut':
       if (++G.fadeT >= 40) startFloor(G.stage + 1);
       break;
@@ -341,16 +342,51 @@ function toMenu() {
 
 function updateMenu() {
   if (handleClicks()) return;
-  if (Input.pressed('left')) { G.menuSel = (G.menuSel + CHARACTERS.length - 1) % CHARACTERS.length; Sound.play('menu'); }
-  if (Input.pressed('right')) { G.menuSel = (G.menuSel + 1) % CHARACTERS.length; Sound.play('menu'); }
-  if (Input.pressed('confirm')) { Sound.play('select'); newRun(G.menuSel); }
+  const n = CHARACTERS.length;
+  if (G.menuFocus === 1) {
+    // фокус на кнопках «Начать» / «Настройки»
+    if (Input.pressed('left') || Input.pressed('right')) { G.menuBtn = 1 - (G.menuBtn || 0); Sound.play('menu'); }
+    if (Input.pressed('up')) { G.menuFocus = 0; Sound.play('menu'); }
+    if (Input.pressed('confirm')) {
+      Sound.play('select');
+      if (G.menuBtn === 1) openSettings('menu'); else newRun(G.menuSel);
+    }
+  } else {
+    if (Input.pressed('left')) { G.menuSel = (G.menuSel + n - 1) % n; Sound.play('menu'); }
+    if (Input.pressed('right')) { G.menuSel = (G.menuSel + 1) % n; Sound.play('menu'); }
+    if (Input.pressed('down')) { G.menuFocus = 1; G.menuBtn = 0; Sound.play('menu'); }
+    if (Input.pressed('confirm')) { Sound.play('select'); newRun(G.menuSel); }
+  }
+  if (Input.pressed('back')) { openSettings('menu'); return; }
   if (G.t % 60 === 0) Sound.music('menu');
+}
+
+// ---------- экран настроек ----------
+function openSettings(from) {
+  G.settingsFrom = from;
+  G.state = 'settings';
+  G.setSel = 0;
+}
+function closeSettings() {
+  G.state = G.settingsFrom === 'pause' ? 'pause' : 'menu';
+}
+function updateSettings() {
+  if (handleClicks()) return;
+  const rows = SETTINGS_DEF.length + 1;
+  if (Input.pressed('back') || Input.pressed('pause')) { Sound.play('menu'); closeSettings(); return; }
+  if (Input.pressed('up')) { G.setSel = (G.setSel + rows - 1) % rows; Sound.play('menu'); }
+  if (Input.pressed('down')) { G.setSel = (G.setSel + 1) % rows; Sound.play('menu'); }
+  const d = SETTINGS_DEF[G.setSel];
+  if (d) {
+    if (Input.pressed('left')) { Settings.cycle(d.key, -1); Sound.play('menu'); }
+    if (Input.pressed('right') || Input.pressed('confirm')) { Settings.cycle(d.key, 1); Sound.play('menu'); }
+  } else if (Input.pressed('confirm')) { Sound.play('select'); closeSettings(); }
 }
 
 const PAUSE_OPTS = [
   ['Продолжить', () => { G.state = 'play'; }],
   ['Начать заново', () => newRun(G.charIdx)],
-  ['Звук: вкл/выкл', () => Sound.toggleMute()],
+  ['Настройки', () => openSettings('pause')],
   ['Главное меню', () => toMenu()],
 ];
 function updatePause() {
@@ -371,6 +407,13 @@ function render() {
   G.ui = [];
   switch (G.state) {
     case 'menu': renderMenu(c); renderRotateHint(c); return;
+    case 'settings':
+      if (G.settingsFrom === 'pause' && G.room) { renderWorld(c, true); drawHUD(c); }
+      else renderMenu(c, true);
+      G.ui = [];
+      renderSettings(c);
+      renderRotateHint(c);
+      return;
     case 'trans': renderTrans(c); drawHUD(c); return;
     case 'win': renderWorld(c, true); renderWin(c); return;
   }
@@ -475,8 +518,7 @@ function renderPause(c) {
   const s = G.stats;
   text(c, 'Убито: ' + s.kills + '   Время: ' + fmtTime(s.time) + '   Сид: ' + seedStr(), W / 2, y0, 17, '#5a4030', 'center', null);
   PAUSE_OPTS.forEach(([label, cb], i) => {
-    const lbl = i === 2 ? 'Звук: ' + (Sound.muted ? 'выкл' : 'вкл') : label;
-    uiButton(c, W / 2 - 130, y0 + 26 + i * 52, 260, 42, lbl, cb, { selected: G.pauseSel === i });
+    uiButton(c, W / 2 - 130, y0 + 26 + i * 52, 260, 42, label, cb, { selected: G.pauseSel === i });
   });
 }
 
@@ -531,7 +573,13 @@ function renderWin(c) {
   }
 }
 
-function renderMenu(c) {
+function charStats(i) {
+  if (!G.charStats) G.charStats = [];
+  if (!G.charStats[i]) G.charStats[i] = statSnapshot(new Player(CHARACTERS[i]));
+  return G.charStats[i];
+}
+
+function renderMenu(c, bgOnly) {
   // фон — тёмный подвал
   const g = c.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, W * 0.7);
   g.addColorStop(0, '#3a2a20'); g.addColorStop(1, '#0a0605');
@@ -542,49 +590,104 @@ function renderMenu(c) {
   }
   // заголовок
   const bob = Math.sin(G.t * 0.03) * 3;
-  text(c, 'СЛЁЗЫ ПОДВАЛА', W / 2, 62 + bob, 64, '#e8dcc0', 'center', '#000', 7);
-  text(c, '~ покаяние ~', W / 2, 108 + bob, 26, '#c44040', 'center', '#000', 4);
+  text(c, 'СЛЁЗЫ ПОДВАЛА', W / 2, 58 + bob, 62, '#e8dcc0', 'center', '#000', 7);
+  text(c, '~ покаяние ~', W / 2, 102 + bob, 25, '#c44040', 'center', '#000', 4);
+  if (bgOnly) return;
 
-  // выбор персонажа
+  // карусель персонажей: выбранный в центре, по два соседа с каждой стороны
   const n = CHARACTERS.length;
   const sel = G.menuSel;
-  for (let i = 0; i < n; i++) {
+  const order = [-2, 2, -1, 1, 0];
+  const y = 262;
+  for (const k of order) {
+    const i = (sel + k + n * 2) % n;
     const ch = CHARACTERS[i];
-    const x = W / 2 + (i - (n - 1) / 2) * 150;
-    const big = i === sel;
-    const y = 300;
+    const x = W / 2 + k * 128;
+    const big = k === 0;
+    const sc = big ? 2.7 : Math.abs(k) === 1 ? 1.55 : 1.15;
     if (big) {
-      const gl = c.createRadialGradient(x, y - 50, 10, x, y - 50, 120);
+      const gl = c.createRadialGradient(x, y - 45, 10, x, y - 45, 110);
       gl.addColorStop(0, 'rgba(255,230,180,0.25)'); gl.addColorStop(1, 'rgba(255,230,180,0)');
-      c.fillStyle = gl; c.fillRect(x - 120, y - 170, 240, 240);
+      c.fillStyle = gl; c.fillRect(x - 110, y - 160, 220, 220);
     }
-    shadow(c, x, y + 2, big ? 34 : 18, big ? 10 : 5, 0.5);
-    drawHero(c, x, y, { dir: 'down', skin: ch.skin, look: ch.look, scale: big ? 3 : 1.6, alpha: big ? 1 : 0.45, moving: false, shoot: big && G.t % 90 < 20 ? 1 : 0 });
-    G.ui.push({ x: x - 50, y: y - 120, w: 100, h: 140, cb: () => { if (i === G.menuSel) { Sound.play('select'); newRun(i); } else G.menuSel = i; } });
+    shadow(c, x, y + 2, 12 * sc, 3.6 * sc, 0.5);
+    drawHero(c, x, y, {
+      dir: 'down', skin: ch.skin, look: ch.look, scale: sc, alpha: big ? (ch.lost ? 0.85 : 1) : Math.abs(k) === 1 ? 0.5 : 0.25,
+      moving: false, shoot: big && G.t % 90 < 20 ? 1 : 0, wings: ch.flight, t: G.t,
+    });
+    G.ui.push({ x: x - 50, y: y - 110, w: 100, h: 125, cb: () => { if (k === 0) { Sound.play('select'); newRun(i); } else { G.menuSel = i; G.menuFocus = 0; } } });
   }
   const ch = CHARACTERS[sel];
-  text(c, ch.name, W / 2, 340, 38, '#f2e6cf', 'center', '#000', 5);
-  text(c, ch.desc, W / 2, 374, 19, '#c8b89a', 'center', '#000', 3);
-  // стартовые сердца и предмет
+  text(c, ch.name, W / 2, 300, 36, G.menuFocus === 1 ? '#c8b89a' : '#f2e6cf', 'center', '#000', 5);
+  text(c, ch.desc, W / 2, 332, 18, '#c8b89a', 'center', '#000', 3);
+  // стартовые сердца, предмет и характеристики
   const hearts = [];
   for (let i = 0; i < ch.hearts; i++) hearts.push('red');
   for (let i = 0; i < (ch.soul || 0); i++) hearts.push('soul');
-  const hw = hearts.length * 20;
-  hearts.forEach((k, i) => drawHeart(c, W / 2 - hw / 2 + 10 + i * 20 - 30, 408, 18, k));
-  if (ch.active) {
-    drawItemIcon(c, ch.active, W / 2 + hw / 2 + 10, 406, 0.9);
-  }
-  // стрелки
-  uiButton(c, W / 2 - 380, 250, 44, 44, '‹', () => { G.menuSel = (G.menuSel + n - 1) % n; }, { size: 30 });
-  uiButton(c, W / 2 + 336, 250, 44, 44, '›', () => { G.menuSel = (G.menuSel + 1) % n; }, { size: 30 });
-  uiButton(c, W / 2 - 110, 436, 220, 44, 'Начать', () => { Sound.play('select'); newRun(G.menuSel); }, { selected: true, size: 24 });
+  const rowW = hearts.length * 20 + (ch.active ? 44 : 0) + (ch.extraLives ? 40 : 0) + (ch.lost ? 120 : 0);
+  let hx = W / 2 - rowW / 2 + 10;
+  for (const k of hearts) { drawHeart(c, hx, 364, 18, k); hx += 20; }
+  if (ch.lost) { text(c, 'нет сердец', hx + 50, 364, 16, '#c8b89a', 'center'); hx += 120; }
+  if (ch.extraLives) { text(c, '+1 жизнь', hx + 16, 364, 14, '#ffd84a', 'center'); hx += 40; }
+  if (ch.active) drawItemIcon(c, ch.active, hx + 18, 362, 0.8);
+  const st = charStats(sel);
+  const rows = [['speed', st.speed], ['tears', st.tears], ['damage', st.damage], ['range', st.range], ['shotspeed', st.shotspeed], ['luck', st.luck]];
+  rows.forEach(([k, v], j) => {
+    const x = W / 2 - 225 + j * 90;
+    drawStatIcon(c, k, x, 398);
+    text(c, (Math.round(v * 100) / 100).toFixed(k === 'luck' ? 0 : 2), x + 14, 399, 16, '#e8e0d0');
+  });
+  // стрелки и кнопки
+  uiButton(c, W / 2 - 400, 196, 44, 44, '‹', () => { G.menuSel = (G.menuSel + n - 1) % n; G.menuFocus = 0; }, { size: 30 });
+  uiButton(c, W / 2 + 356, 196, 44, 44, '›', () => { G.menuSel = (G.menuSel + 1) % n; G.menuFocus = 0; }, { size: 30 });
+  const fb = G.menuFocus === 1 ? (G.menuBtn || 0) : -1;
+  uiButton(c, W / 2 - 230, 426, 220, 44, 'Начать', () => { Sound.play('select'); newRun(G.menuSel); }, { selected: fb !== 1, size: 24 });
+  uiButton(c, W / 2 + 10, 426, 220, 44, 'Настройки', () => { Sound.play('select'); openSettings('menu'); }, { selected: fb === 1, size: 22 });
 
   const help = Input.touchMode
     ? 'Левый палец — ходить • Правый палец — стрелять • Кнопки справа — предмет, бомба, пилюля'
     : 'WASD — ходить • Стрелки — стрелять • E — бомба • Пробел — предмет • Q — пилюля • Tab — карта • F — полный экран • M — звук';
-  text(c, help, W / 2, 506, 15, '#9a8a70', 'center', '#000', 3);
+  text(c, help, W / 2, 496, 15, '#9a8a70', 'center', '#000', 3);
   const wins = +store('sp_wins') || 0, runs = +store('sp_runs') || 0, best = +store('sp_best') || 0;
-  if (runs) text(c, 'Забегов: ' + runs + '   Побед: ' + wins + (best ? '   Глубже всего: ' + STAGES[best].name : ''), W / 2, 528, 13, '#6a5a48', 'center', null);
+  if (runs) text(c, 'Забегов: ' + runs + '   Побед: ' + wins + (best ? '   Глубже всего: ' + STAGES[best].name : ''), W / 2, 520, 13, '#6a5a48', 'center', null);
+}
+
+function renderSettings(c) {
+  c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillRect(0, 0, W, H);
+  const px = W / 2 - 340, py = 24, pw = 680, ph = 492;
+  rrect(c, px, py, pw, ph, 14, '#e8dcc0', '#3a2a1a', 4);
+  text(c, 'НАСТРОЙКИ', W / 2, py + 34, 36, '#2a1a10', 'center', null);
+  const rowH = 43, y0 = py + 66;
+  SETTINGS_DEF.forEach((d, i) => {
+    const y = y0 + i * rowH;
+    const selRow = G.setSel === i;
+    if (selRow) rrect(c, px + 16, y, pw - 32, rowH - 5, 8, 'rgba(120,60,40,0.18)', '#a8885a', 2);
+    text(c, d.label, px + 34, y + rowH / 2 - 2, 21, '#2a1a10', 'left', null);
+    const vx = px + pw - 170;
+    // стрелки
+    const bl = { x: vx - 112, y: y + 4, w: 30, h: rowH - 13 }, br = { x: vx + 82, y: y + 4, w: 30, h: rowH - 13 };
+    rrect(c, bl.x, bl.y, bl.w, bl.h, 6, 'rgba(40,24,18,0.85)', '#a8885a', 1.5);
+    rrect(c, br.x, br.y, br.w, br.h, 6, 'rgba(40,24,18,0.85)', '#a8885a', 1.5);
+    text(c, '‹', bl.x + bl.w / 2, bl.y + bl.h / 2, 22, '#f2e6cf', 'center', null);
+    text(c, '›', br.x + br.w / 2, br.y + br.h / 2, 22, '#f2e6cf', 'center', null);
+    G.ui.push({ x: bl.x, y: bl.y, w: bl.w, h: bl.h, cb: () => { G.setSel = i; Settings.cycle(d.key, -1); } });
+    G.ui.push({ x: br.x, y: br.y, w: br.w, h: br.h, cb: () => { G.setSel = i; Settings.cycle(d.key, 1); } });
+    G.ui.push({ x: px + 16, y, w: bl.x - px - 20, h: rowH - 5, cb: () => { G.setSel = i; Settings.cycle(d.key, 1); } });
+    text(c, Settings.label(d.key), vx - 15, y + rowH / 2 - 2, 20, '#5a1e10', 'center', null);
+    // образец снаряда рядом с настройками заметности
+    if (d.key === 'projVis' || d.key === 'shotColor') drawShotSample(c, vx + 54, y + rowH / 2 - 2);
+  });
+  const by = y0 + SETTINGS_DEF.length * rowH + 4;
+  uiButton(c, W / 2 - 110, by, 220, 40, 'Назад', () => closeSettings(), { selected: G.setSel === SETTINGS_DEF.length });
+  const d = SETTINGS_DEF[G.setSel];
+  text(c, d && d.hint ? d.hint : (Input.touchMode ? 'Нажмите на стрелки, чтобы изменить' : '↑↓ — выбрать   ←→ — изменить   Esc — назад'), W / 2, py + ph - 14, 15, '#6a5a48', 'center', null);
+}
+
+// маленький образец вражеского снаряда для экрана настроек
+function drawShotSample(c, x, y) {
+  if (typeof drawEnemyShot === 'function') { drawEnemyShot(c, x, y, 6, G.t); return; }
+  const sc = shotColor();
+  circle(c, x, y, 6, sc.fill, sc.dark, 1.5);
 }
 
 function fmtTime(frames) {

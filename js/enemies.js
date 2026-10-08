@@ -875,29 +875,30 @@ const ENEMIES = {
     },
   },
   blob: {
-    name: 'Кровавый Слизень', hp: 150, r: 38, boss: true, blood: '#a01020',
+    name: 'Кровавый Слизень', hp: 110, r: 38, boss: true, blood: '#a01020',
     init(e, o) {
       e.size = o.size != null ? o.size : 3;
       const S = BLOB_SIZES[e.size];
       e.r = S.r;
       if (o.size != null) { e.maxHp = e.hp = S.hp * hpScale(true); }
-      e.st = 'rest'; e.timer = randi(30, 60);
+      e.st = 'rest'; e.timer = o.size != null ? randi(45, 70) : randi(40, 70);
     },
     update(e) {
       if (e.st === 'rest') {
         e.vx *= 0.8; e.vy *= 0.8;
         if (--e.timer <= 0) {
           const p = G.player;
-          const a = angleTo(e, p) + rand(-0.4, 0.4), l = Math.min(dist(e, p), 60 + e.size * 30);
-          e.jd = 28 + e.size * 6; e.jt = 0; e.mvx = Math.cos(a) * l / e.jd; e.mvy = Math.sin(a) * l / e.jd; e.st = 'jump';
+          const a = angleTo(e, p) + rand(-0.5, 0.5), l = Math.min(dist(e, p), 50 + e.size * 22);
+          e.jd = 32 + e.size * 6; e.jt = 0; e.mvx = Math.cos(a) * l / e.jd; e.mvy = Math.sin(a) * l / e.jd; e.st = 'jump';
         }
       } else {
         e.jt++;
         e.z = Math.sin(e.jt / e.jd * Math.PI) * (18 + e.size * 12);
         e.vx = e.mvx; e.vy = e.mvy;
         if (e.jt >= e.jd) {
-          e.z = 0; e.st = 'rest'; e.timer = randi(25, 50) - e.size * 4;
-          if (e.size >= 2) { const n = e.size * 3; for (let i = 0; i < n; i++) enemyShot(e.x, e.y, i / n * Math.PI * 2 + rand(0, 1), 3.2, { cause: 'Кровавый Слизень' }); }
+          e.z = 0; e.st = 'rest'; e.timer = randi(45, 75) + e.size * 6;
+          // только самый большой слизень разбрасывает кольцо снарядов
+          if (e.size >= 3) { const n = 6, off = rand(0, Math.PI); for (let i = 0; i < n; i++) enemyShot(e.x, e.y, i / n * Math.PI * 2 + off, 2.6, { cause: 'Кровавый Слизень' }); }
           if (e.size >= 1) Sound.play('stomp');
           G.shake = Math.max(G.shake, e.size * 2);
         }
@@ -905,7 +906,8 @@ const ENEMIES = {
     },
     pending(e) { return blobPending(e.size) * hpScale(true); },
     onDeath(e) {
-      if (e.size > 0) for (const s of [-1, 1]) {
+      // самые мелкие (размер 1) больше не делятся
+      if (e.size > 1) for (const s of [-1, 1]) {
         const b = new Enemy('blob', e.x + s * e.r * 0.6, e.y, { size: e.size - 1, noSpawn: true });
         b.kx = s * 4;
         G.enemies.push(b);
@@ -1105,8 +1107,8 @@ const ENEMIES = {
   },
 };
 
-const BLOB_SIZES = [{ r: 10, hp: 10 }, { r: 17, hp: 26 }, { r: 26, hp: 60 }, { r: 38, hp: 150 }];
-function blobPending(s) { return s > 0 ? 2 * (BLOB_SIZES[s - 1].hp + blobPending(s - 1)) : 0; }
+const BLOB_SIZES = [{ r: 10, hp: 10 }, { r: 17, hp: 20 }, { r: 26, hp: 45 }, { r: 38, hp: 110 }];
+function blobPending(s) { return s > 1 ? 2 * (BLOB_SIZES[s - 1].hp + blobPending(s - 1)) : 0; }
 
 function wormNext(e) {
   const [c, r] = tileOf(e.x, e.y);

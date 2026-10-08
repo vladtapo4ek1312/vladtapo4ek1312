@@ -41,6 +41,26 @@ const CHARACTERS = [
     desc: 'Только синие сердца. Быстрые слёзы.',
     hearts: 0, soul: 3, soulOnly: true, tears: 0.35, range: 0.75, bombs: 1, active: 'catHead',
   },
+  {
+    id: 'brute', name: 'Буян', look: 'brute', skin: '#efcdb6',
+    desc: 'Каждый удар злит его: урон растёт до конца комнаты.',
+    hearts: 3, rage: true, tears: -0.2, speed: 0.05, bombs: 1, keys: 1, active: null,
+  },
+  {
+    id: 'phoenix', name: 'Феникс', look: 'phoenix', skin: '#f3d6c4',
+    desc: 'Один раз восстанет из пепла с огненными слезами.',
+    hearts: 2, extraLives: 1, phoenix: true, bombs: 1, coins: 5, active: 'hourglass',
+  },
+  {
+    id: 'horned', name: 'Рогатый', look: 'horned', skin: '#5a4652',
+    desc: 'Летает и стреляет коротким адским лучом.',
+    hearts: 1, soul: 2, flight: true, brimShort: true, dmgMult: 1.1, bombs: 0, active: null,
+  },
+  {
+    id: 'lost', name: 'Потерянный', look: 'lost', skin: '#eef0f6',
+    desc: 'Гибнет от одного удара, но щит спасает раз в комнату. Летает, сделки с дьяволом бесплатны.',
+    hearts: 0, soul: 0, lost: true, flight: true, bombs: 1, active: 'd6',
+  },
 ];
 
 // ---------- Предметы ----------
@@ -86,7 +106,7 @@ const ITEMS = {
   piggy: { name: 'Копилка', desc: '+15 монет', pools: ['shop'], apply: p => { p.coins = Math.min(99, p.coins + 15); p.addContainers(0, 2); } },
   keyRing: { name: 'Связка ключей', desc: '+5 ключей', pools: ['shop'], apply: p => { p.keys = Math.min(99, p.keys + 5); } },
   lump: { name: 'Уголёк', desc: 'Урон растёт с расстоянием', pools: ['treasure'], apply: p => { p.flags.coal = true; } },
-  compass: { name: 'Карта сокровищ', desc: 'Видишь весь этаж', pools: ['shop', 'treasure'], apply: p => { p.flags.map = true; if (G.floor) revealFloor(); } },
+  compass: { name: 'Карта сокровищ', desc: 'Видишь весь этаж', pools: ['shop', 'treasure'], apply: p => { p.flags.map = true; if (G.floor && !p.sandbox) revealFloor(); } },
   soy: { name: 'Соевое молоко', desc: 'Много слабых слёз', pools: ['treasure'], w: 0.5, apply: p => { p.tearsMult *= 4.5; p.dmgMult *= 0.22; p.flags.small = true; } },
   fireMind: { name: 'Огненный разум', desc: 'Слёзы поджигают', pools: ['treasure', 'devil'], apply: p => { p.flags.burn = true; p.luck += 1; } },
   ankh: { name: 'Анкх', desc: 'Вечная жизнь?', pools: ['treasure', 'secret'], w: 0.25, apply: p => { p.extraLives += 1; } },

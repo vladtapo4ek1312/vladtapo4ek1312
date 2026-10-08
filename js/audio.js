@@ -70,6 +70,7 @@ const Sound = {
       const d = b.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.noiseBuf = b;
+      if (typeof Settings !== 'undefined') Settings.apply();
       if (this.pendingTrack) { const t = this.pendingTrack; this.track = null; this.music(t); }
     } catch (e) { this.ctx = null; }
   },

@@ -19,7 +19,7 @@ function takeItem(pool) {
 
 // ---------- частицы и декали ----------
 function addParticle(x, y, vx, vy, color, size = 3, life = 30, grav = false, z = 0) {
-  if (G.particles.length > 400) return;
+  if (G.particles.length > [120, 260, 450][gfxLevel()]) return;
   G.particles.push({ x, y, vx, vy, color, size, life, max: life, grav, z, vz: grav ? rand(1, 3) : 0 });
 }
 function bloodBurst(x, y, n = 10, color = '#9a1010') {
@@ -147,6 +147,13 @@ class Player {
     this.trail = []; this.roomDmg = 0; this.shieldT = 0; this.mantle = false; this.holding = 0; this.holdItem = null;
     this.extraLives = 0; this.devilBonus = 0; this.dead = false; this.restartHold = 0; this.roomHoming = false;
     this.flashT = 0;
+    // особенности персонажей
+    this.extraLives = ch.extraLives || 0;
+    this.rage = !!ch.rage;
+    this.phoenix = !!ch.phoenix;
+    this.lost = !!ch.lost;
+    if (this.lost) { this.flags.spectral = true; this.flags.mantle = true; this.mantle = true; }
+    if (ch.brimShort) { this.flags.brimstone = true; this.beamRange = T * 4.3; }
     if (ch.active) this.setActive(ch.active);
   }
 
@@ -162,6 +169,7 @@ class Player {
 
   // --- здоровье ---
   addContainers(n, heal) {
+    if (this.lost) return;
     if (this.soulOnly) { if (n > 0) this.addSoul(n * 2); return; }
     this.maxHearts = clamp(this.maxHearts + n, 0, 12);
     const cap = (12 - this.maxHearts) * 2;
@@ -175,13 +183,14 @@ class Player {
     return this.hp > b;
   }
   addSoul(halves) {
+    if (this.lost) return false;
     const cap = (12 - this.maxHearts) * 2;
     const b = this.soul;
     this.soul = Math.min(cap, this.soul + halves);
     return this.soul > b;
   }
-  canHeal() { return !this.soulOnly && this.hp < this.maxHearts * 2; }
-  canSoul() { return this.maxHearts * 2 + this.soul < 24; }
+  canHeal() { return !this.soulOnly && !this.lost && this.hp < this.maxHearts * 2; }
+  canSoul() { return !this.lost && this.maxHearts * 2 + this.soul < 24; }
 
   hurt(amount, cause) {
     if (this.dead || this.invuln > 0 || G.state !== 'play') return false;
@@ -198,6 +207,11 @@ class Player {
     }
     G.damagedFloor = true;
     if (G.room.type === 'boss') G.damagedBoss = true;
+    if (this.rage && this.roomDmg < 3.6) {
+      // Буян: каждый удар добавляет урон до конца комнаты
+      this.roomDmg = Math.min(3.6, this.roomDmg + 0.6);
+      Sound.play('roar');
+    }
     this.invuln = 60;
     Sound.play('hurt');
     G.shake = Math.max(G.shake, 6);
@@ -208,13 +222,22 @@ class Player {
   }
 
   die(cause) {
-    if (this.dead) return;
+    if (this.dead || this.sandbox) return;
     if (this.extraLives > 0) {
       this.extraLives--;
-      if (this.soulOnly) this.soul = 6; else { this.maxHearts = Math.max(1, this.maxHearts); this.hp = this.maxHearts * 2; }
+      if (this.lost) { /* Потерянному хватает щита */ }
+      else if (this.soulOnly) this.soul = 6;
+      else { this.maxHearts = Math.max(1, this.maxHearts); this.hp = this.maxHearts * 2; }
       this.invuln = 120;
+      if (this.phoenix) {
+        // Феникс: восстаёт один раз и получает огненные слёзы
+        this.phoenix = false;
+        this.dmgUp += 1; this.flags.burn = true;
+        G.banner = { title: 'Феникс восстал!', desc: 'Урон вверх, слёзы поджигают', t: 170 };
+        for (let i = 0; i < 30; i++) { const a = rand(0, Math.PI * 2), sp = rand(1, 5); addParticle(this.x, this.y - 16, Math.cos(a) * sp, Math.sin(a) * sp, pick(['#ff9a24', '#ffd84a', '#ff5a1a']), rand(3, 6), randi(25, 50)); }
+        G.flash = 14;
+      } else G.banner = { title: 'Ещё одна жизнь!', desc: 'Анкх спас тебя', t: 150 };
       Sound.play('secret');
-      G.banner = { title: 'Ещё одна жизнь!', desc: 'Анкх спас тебя', t: 150 };
       return;
     }
     this.dead = true;
@@ -232,12 +255,14 @@ class Player {
   giveItem(id, silent) {
     const it = ITEMS[id];
     if (!it) return;
+    // описание изменений считаем до применения предмета
+    const info = !silent && Settings.v.itemInfo !== 'off' ? describeItem(id, this) : null;
     if (it.active) this.setActive(id);
     else { this.items.push(id); if (it.apply) it.apply(this); }
     G.stats.items++;
     if (!silent) {
       this.holding = 50; this.holdItem = id;
-      G.banner = { title: it.name, desc: it.desc, t: 170 };
+      G.banner = { title: it.name, desc: it.desc, t: 170, lines: info ? info.lines.filter(l => l.kind !== 'note' || Settings.v.itemInfo === 'full') : null };
       Sound.play('item');
     }
   }
@@ -429,7 +454,7 @@ class Player {
   fireBrimstone(dir) {
     const base = DIR_ANGLE[dir];
     for (const s of this.shotAngles(base)) {
-      G.beams.push(new Beam({ x: this.x, y: this.y - 6, angle: s.a, width: 26 * Math.min(1.6, this.tearScale), life: 26, dmg: this.damage * 0.6, tick: 3, kind: 'brim', follow: this, status: this.statusFlags() }));
+      G.beams.push(new Beam({ x: this.x, y: this.y - 6, angle: s.a, width: 26 * Math.min(1.6, this.tearScale), life: 26, dmg: this.damage * 0.6, tick: 3, kind: 'brim', follow: this, status: this.statusFlags(), maxLen: this.beamRange || 0 }));
     }
     this.beamT = 26;
     this.headDir = dir; this.headT = 26;
@@ -457,7 +482,7 @@ class Player {
     drawHero(c, this.x, this.y - (this.flight ? 6 + Math.sin(G.t * 0.1) * 2 : 0), {
       dir: this.holding > 0 ? 'down' : this.headDir, skin: this.ch.skin, look: this.ch.look,
       moving: this.moving, walk: this.walk, shoot: this.shootT || (this.charge > 0 ? 1 : 0), scale: this.size,
-      alpha: blink ? 0.35 : 1, holding: this.holding > 0, t: G.t,
+      alpha: blink ? 0.35 : (this.lost ? 0.82 : 1), holding: this.holding > 0, t: G.t, rage: this.rage && this.roomDmg > 0,
       wings: this.flight, halo: this.flags.halo, horns: this.flags.brimstone || this.items.includes('pentagram') && this.items.includes('goat'),
       hat: this.flags.wiz,
     });
@@ -617,7 +642,11 @@ class Beam {
   }
   calc() {
     if (this.follow) { this.x = this.follow.x; this.y = this.follow.y - 6; }
-    const [ex, ey] = rayToWall(this.x, this.y, this.angle);
+    let [ex, ey] = rayToWall(this.x, this.y, this.angle);
+    if (this.maxLen) {
+      const d = Math.hypot(ex - this.x, ey - this.y);
+      if (d > this.maxLen) { ex = this.x + (ex - this.x) / d * this.maxLen; ey = this.y + (ey - this.y) / d * this.maxLen; }
+    }
     this.ex = ex; this.ey = ey;
   }
   update() {
@@ -838,6 +867,7 @@ class Pedestal {
   }
   devilCost(p) {
     if (!this.devil) return null;
+    if (p.lost) return { free: true };
     if (p.maxHearts >= this.devil && !p.soulOnly) return { hearts: this.devil };
     if (p.soul >= 6) return { soul: 6 };
     return null;
@@ -859,7 +889,7 @@ class Pedestal {
     if (this.price) p.coins -= this.price;
     if (cost) {
       if (cost.hearts) { p.maxHearts -= cost.hearts; p.hp = Math.min(p.hp, p.maxHearts * 2); if (p.hp <= 0 && p.soul <= 0) p.soul = 1; }
-      else p.soul -= cost.soul;
+      else if (cost.soul) p.soul -= cost.soul;
       G.devilTaken = true;
     }
     this.price = 0; this.devil = 0;
@@ -896,9 +926,12 @@ class Pedestal {
       if (this.devil) {
         const p = G.player;
         const cost = this.devilCost(p);
-        const soul = cost && cost.soul;
-        const n = soul ? 3 : this.devil;
-        for (let i = 0; i < n; i++) drawHeart(c, this.x + (i - (n - 1) / 2) * 15, this.y + 22, 13, soul ? 'soul' : 'red');
+        if (cost && cost.free) text(c, 'бесплатно', this.x, this.y + 22, 14, '#ffd84a', 'center');
+        else {
+          const soul = cost && cost.soul;
+          const n = soul ? 3 : this.devil;
+          for (let i = 0; i < n; i++) drawHeart(c, this.x + (i - (n - 1) / 2) * 15, this.y + 22, 13, soul ? 'soul' : 'red');
+        }
       }
     }
   }
