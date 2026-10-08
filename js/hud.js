@@ -642,9 +642,11 @@ function fixBOverlap(x, y, w, h, r) {
 // и выходить за пределы комнаты со стенами. Возвращает [x, y, сторона].
 function fixBPlace(cands, w, h, keep, zones) {
   const rx0 = RX - WALL, ry0 = RY - WALL, rx1 = RX + RW + WALL, ry1 = RY + RH + WALL;
+  // в сенсорном режиме справа колонка кнопок — подсказка не заходит под неё
+  const xr = Input.touchMode ? W - 84 : W - 4;
   let best = null, bs = Infinity;
   for (const [cx0, cy0, sd] of cands) {
-    const x = clamp(cx0, 4, W - 4 - w), y = clamp(cy0, 4, H - 4 - h);
+    const x = clamp(cx0, 4, xr - w), y = clamp(cy0, 4, H - 4 - h);
     let sc = (w * h - fixBOverlap(x, y, w, h, [rx0, ry0, rx1, ry1])) * 0.02;
     for (const r of keep) sc += 4 * fixBOverlap(x, y, w, h, r);
     for (const r of zones) sc += fixBOverlap(x, y, w, h, r);
