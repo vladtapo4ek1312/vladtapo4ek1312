@@ -1,0 +1,30 @@
+:root {
+  --bg: #0b0706;
+  --fg: #e8dcc0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0b0706; --fg: #e8dcc0; }
+}
+:root[data-theme="dark"] { --bg: #0b0706; --fg: #e8dcc0; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+canvas {
+  display: block;
+  outline: none;
+  touch-action: none;
+}
